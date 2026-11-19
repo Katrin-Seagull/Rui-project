@@ -2,6 +2,10 @@ name: Build GLaDOS APK
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,8 +18,44 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-      - run: gradle assembleDebug --no-daemon
-      - run: cp app/build/outputs/apk/debug/app-debug.apk GLaDOS-AI.apk
+
+      - name: Decode signing keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
+
+      - name: Build signed Release APK
+        env:
+          KEYSTORE_FILE: release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          APP_VERSION_CODE: ${{ 10 + github.run_number }}
+          APP_VERSION_NAME: 1.2.${{ github.run_number }}
+        run: gradle assembleRelease --no-daemon
+
+      - name: Prepare release files
+        env:
+          APP_VERSION_CODE: ${{ 10 + github.run_number }}
+          APP_VERSION_NAME: 1.2.${{ github.run_number }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk GLaDOS-AI.apk
+          cat <<EOF > version.json
+          {
+            "versionCode": ${APP_VERSION_CODE},
+            "versionName": "${APP_VERSION_NAME}",
+            "apkUrl": "https://github.com/${{ github.repository }}/releases/latest/download/GLaDOS-AI.apk"
+          }
+          EOF
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION_NAME: 1.2.${{ github.run_number }}
+        run: |
+          gh release create "v${APP_VERSION_NAME}" GLaDOS-AI.apk version.json \
+            --title "GLaDOS AI v${APP_VERSION_NAME}" \
+            --notes "Автоматическая сборка приложения" \
+            --latest
+
       - uses: actions/upload-artifact@v4
         with:
           name: GLaDOS-AI-APK
