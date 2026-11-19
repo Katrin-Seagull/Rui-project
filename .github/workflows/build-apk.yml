@@ -19,6 +19,13 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Compute version
+        run: |
+          CODE=$((10 + ${{ github.run_number }}))
+          NAME="1.2.${{ github.run_number }}"
+          echo "APP_VERSION_CODE=${CODE}" >> "$GITHUB_ENV"
+          echo "APP_VERSION_NAME=${NAME}" >> "$GITHUB_ENV"
+
       - name: Decode signing keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
 
@@ -28,14 +35,9 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          APP_VERSION_CODE: ${{ 10 + github.run_number }}
-          APP_VERSION_NAME: 1.2.${{ github.run_number }}
         run: gradle assembleRelease --no-daemon
 
       - name: Prepare release files
-        env:
-          APP_VERSION_CODE: ${{ 10 + github.run_number }}
-          APP_VERSION_NAME: 1.2.${{ github.run_number }}
         run: |
           cp app/build/outputs/apk/release/app-release.apk GLaDOS-AI.apk
           cat <<EOF > version.json
@@ -49,7 +51,6 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APP_VERSION_NAME: 1.2.${{ github.run_number }}
         run: |
           gh release create "v${APP_VERSION_NAME}" GLaDOS-AI.apk version.json \
             --title "GLaDOS AI v${APP_VERSION_NAME}" \
