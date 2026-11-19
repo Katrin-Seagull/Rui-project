@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>GLaDOS AI — Нет связи</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: #111827; color: #f8fafc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 360px; background: #1f2937; border: 1px solid #374151;
+    border-radius: 16px; padding: 28px 22px; text-align: center;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+  }
+  .ring {
+    width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 50%;
+    border: 4px solid #38bdf8; display: flex; align-items: center; justify-content: center;
+  }
+  .core { width: 16px; height: 16px; border-radius: 50%; background: #f8fafc; }
+  h1 { font-size: 18px; margin: 0 0 8px; font-weight: 600; }
+  p { font-size: 14px; color: #9ca3af; line-height: 1.5; margin: 0 0 22px; }
+  button {
+    width: 100%; padding: 12px 16px; border: none; border-radius: 10px;
+    background: #38bdf8; color: #0f172a; font-size: 15px; font-weight: 600;
+    cursor: pointer; margin-bottom: 10px;
+  }
+  button.secondary {
+    background: transparent; color: #cbd5e1; border: 1px solid #475569;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="ring"><div class="core"></div></div>
+    <h1>Нет подключения к серверу</h1>
+    <p>Не удалось связаться с вашим сервером. Проверьте интернет, VPN или работу сервера на ПК.</p>
+    <button onclick="retry()">Повторить подключение</button>
+    <button class="secondary" onclick="openCache()">Открыть из офлайн-кэша</button>
+  </div>
+  <script>
+    function retry() {
+      if (window.GLaDOSNative) { window.GLaDOSNative.reloadServer(); }
+      else { location.href = 'https://disquisitive.duckdns.org:48721/'; }
+    }
+    function openCache() {
+      if (window.GLaDOSNative) { window.GLaDOSNative.loadOfflineCache(); }
+      else { location.href = 'https://disquisitive.duckdns.org:48721/'; }
+    }
+  </script>
+</body>
+</html>
