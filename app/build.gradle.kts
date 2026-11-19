@@ -11,13 +11,30 @@ android {
         applicationId = "org.glados.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = System.getenv("APP_VERSION_CODE")?.toIntOrNull() ?: 2
+        versionName = System.getenv("APP_VERSION_NAME") ?: "1.2.0"
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("KEYSTORE_FILE")
+            if (!ksPath.isNullOrBlank()) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
