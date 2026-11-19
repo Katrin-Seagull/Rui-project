@@ -1,13 +1,16 @@
 package org.glados.app
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
@@ -17,17 +20,27 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val SERVER_URL = "https://disquisitive.duckdns.org:48721/"
         private const val SERVER_HOST = "disquisitive.duckdns.org"
-        private const val APP_VERSION = "1.1.0"
+        private const val UPDATE_JSON_URL =
+            "https://github.com/Katrin-Seagull/Rui-project/releases/latest/download/version.json"
     }
 
     private lateinit var webView: WebView
@@ -113,7 +126,6 @@ class MainActivity : AppCompatActivity() {
                     val currentUrl = view?.url ?: ""
                     if (!currentUrl.startsWith("file:///android_asset/")) {
                         if (!triedCacheFallback) {
-                            // Сначала открываем сохранённый кэш с чатами, не выкидывая на экран ошибки
                             triedCacheFallback = true
                             view?.settings?.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
                             view?.loadUrl(SERVER_URL)
@@ -169,6 +181,11 @@ class MainActivity : AppCompatActivity() {
         } else {
             webView.loadUrl(SERVER_URL)
         }
+
+        // Фоновая проверка новой версии APK при запуске
+        if (isOnline()) {
+            checkForApkUpdate(silent = true)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -189,9 +206,166 @@ class MainActivity : AppCompatActivity() {
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
+    private fun openConnectionWithRedirects(urlStr: String): HttpURLConnection {
+        var current = urlStr
+        repeat(6) {
+            val conn = (URL(current).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10000
+                readTimeout = 20000
+                instanceFollowRedirects = false
+                setRequestProperty("User-Agent", "GLaDOS-Android/${BuildConfig.VERSION_NAME}")
+            }
+            val code = conn.responseCode
+            if (code in listOf(301, 302, 303, 307, 308)) {
+                val loc = conn.getHeaderField("Location") ?: return conn
+                conn.disconnect()
+                current = URL(URL(current), loc).toString()
+            } else {
+                return conn
+            }
+        }
+        return URL(current).openConnection() as HttpURLConnection
+    }
+
+    private fun checkForApkUpdate(silent: Boolean) {
+        Thread {
+            try {
+                val conn = openConnectionWithRedirects(UPDATE_JSON_URL)
+                if (conn.responseCode != 200) {
+                    conn.disconnect()
+                    if (!silent) runOnUiThread {
+                        Toast.makeText(this, "Не удалось проверить обновления", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
+                val text = conn.inputStream.bufferedReader().use { it.readText() }
+                conn.disconnect()
+
+                val json = JSONObject(text)
+                val remoteCode = json.optInt("versionCode", 0)
+                val remoteName = json.optString("versionName", "")
+                val apkUrl = json.optString("apkUrl", "")
+
+                if (remoteCode > BuildConfig.VERSION_CODE && apkUrl.isNotBlank()) {
+                    runOnUiThread {
+                        if (isFinishing) return@runOnUiThread
+                        AlertDialog.Builder(this)
+                            .setTitle("Доступно обновление $remoteName")
+                            .setMessage("Вышла новая версия приложения. Все ваши чаты и настройки сохранятся.")
+                            .setPositiveButton("Обновить") { _, _ ->
+                                downloadAndInstallApk(apkUrl)
+                            }
+                            .setNegativeButton("Позже", null)
+                            .show()
+                    }
+                } else if (!silent) {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Установлена последняя версия (${BuildConfig.VERSION_NAME})",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            } catch (_: Exception) {
+                if (!silent) {
+                    runOnUiThread {
+                        Toast.makeText(this, "Ошибка проверки обновлений", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun downloadAndInstallApk(apkUrl: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(
+                this,
+                "Разрешите установку обновлений для GLaDOS AI и повторите",
+                Toast.LENGTH_LONG
+            ).show()
+            val intent = Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+            return
+        }
+
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        val label = TextView(this).apply { text = "Загрузка обновления... 0%" }
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = false
+            max = 100
+            progress = 0
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            addView(label)
+            addView(bar)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Обновление GLaDOS AI")
+            .setView(box)
+            .setCancelable(false)
+            .show()
+
+        Thread {
+            try {
+                val conn = openConnectionWithRedirects(apkUrl)
+                if (conn.responseCode != 200) throw Exception("HTTP ${conn.responseCode}")
+                val total = conn.contentLengthLong
+                val outDir = File(cacheDir, "updates").apply { mkdirs() }
+                val apkFile = File(outDir, "GLaDOS-AI.apk")
+
+                conn.inputStream.use { input ->
+                    FileOutputStream(apkFile).use { output ->
+                        val buf = ByteArray(8192)
+                        var downloaded = 0L
+                        var read: Int
+                        while (input.read(buf).also { read = it } != -1) {
+                            output.write(buf, 0, read)
+                            downloaded += read
+                            if (total > 0) {
+                                val pct = ((downloaded * 100) / total).toInt()
+                                runOnUiThread {
+                                    bar.progress = pct
+                                    label.text = "Загрузка обновления... $pct%"
+                                }
+                            }
+                        }
+                    }
+                }
+                conn.disconnect()
+
+                runOnUiThread {
+                    dialog.dismiss()
+                    val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apkFile)
+                    val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(installIntent)
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    dialog.dismiss()
+                    Toast.makeText(this, "Не удалось скачать обновление", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
     inner class NativeBridge {
         @JavascriptInterface
-        fun getAppVersion(): String = APP_VERSION
+        fun getAppVersion(): String = BuildConfig.VERSION_NAME
+
+        @JavascriptInterface
+        fun checkApkUpdate() {
+            checkForApkUpdate(silent = false)
+        }
 
         @JavascriptInterface
         fun reloadServer() {
