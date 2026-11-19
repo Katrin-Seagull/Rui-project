@@ -27,12 +27,13 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val SERVER_URL = "https://disquisitive.duckdns.org:48721/"
         private const val SERVER_HOST = "disquisitive.duckdns.org"
-        private const val APP_VERSION = "1.0.0"
+        private const val APP_VERSION = "1.1.0"
     }
 
     private lateinit var webView: WebView
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private var lastBackPressTime: Long = 0L
+    private var triedCacheFallback = false
 
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -95,6 +96,13 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                if (url != null && url.startsWith("https://")) {
+                    triedCacheFallback = false
+                }
+            }
+
             override fun onReceivedError(
                 view: WebView?,
                 request: WebResourceRequest?,
@@ -104,7 +112,14 @@ class MainActivity : AppCompatActivity() {
                 if (request?.isForMainFrame == true) {
                     val currentUrl = view?.url ?: ""
                     if (!currentUrl.startsWith("file:///android_asset/")) {
-                        view?.loadUrl("file:///android_asset/offline.html")
+                        if (!triedCacheFallback) {
+                            // Сначала открываем сохранённый кэш с чатами, не выкидывая на экран ошибки
+                            triedCacheFallback = true
+                            view?.settings?.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
+                            view?.loadUrl(SERVER_URL)
+                        } else {
+                            view?.loadUrl("file:///android_asset/offline.html")
+                        }
                     }
                 }
             }
@@ -181,6 +196,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun reloadServer() {
             runOnUiThread {
+                triedCacheFallback = false
                 webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
                 webView.loadUrl(SERVER_URL)
             }
@@ -189,6 +205,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun loadOfflineCache() {
             runOnUiThread {
+                triedCacheFallback = true
                 webView.settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
                 webView.loadUrl(SERVER_URL)
             }
@@ -197,7 +214,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun hardRefreshCache() {
             runOnUiThread {
-                // Очищает только HTTP-кэш оболочки; localStorage, IndexedDB и cookie остаются на месте
+                triedCacheFallback = false
                 webView.clearCache(true)
                 webView.settings.cacheMode = WebSettings.LOAD_NO_CACHE
                 webView.loadUrl(SERVER_URL)
